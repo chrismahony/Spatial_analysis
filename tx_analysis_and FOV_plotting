@@ -1,0 +1,188 @@
+#step 2
+
+#plot slides
+metadata <- as.data.frame(obj2@meta.data)
+cellCoords <-subset(metadata, select=c("x_FOV_px", "y_FOV_px", "x_slide_mm", "y_slide_mm", 
+            "slide_ID_numeric", "Run_Tissue_name", "fov"))
+
+ggplot(cellCoords, aes(x=x_slide_mm, y=y_slide_mm))+
+  geom_point(alpha = 0.05, size = 0.01)+
+  facet_wrap(~Run_Tissue_name)+
+  coord_equal()+
+  labs(title = "Cell coordinates in XY space")
+
+
+
+#remove unwanted probes
+transcriptCoords <-as.data.frame(obj@misc$transcriptCoords)
+transcriptCoords<-transcriptCoords[!transcriptCoords$codeclass=="SystemControl",]
+transcriptCoords<-transcriptCoords[!transcriptCoords$codeclass=="Negative",]
+
+#draw cell outlines, cellgeoms_baysor() will take tiem to run (5-20min/fov depending upon the #txs)
+library(furrr)
+library(sfdct)
+cellgeoms_baysor<-function(segfile){
+    #system.time({ 
+    #    plan(multicore, workers = availableCores(constraints = 'multicore') - 1)
+        # delete transcripts that are noise
+        #segfile<-segfile %>% filter(is_noise == FALSE)
+        transcriptspercell<-furrr::future_map_dfr(.x = unique(segfile$cell), 
+                                                  .f = ~ data.frame(
+                                                      cell = .x, 
+                                                      num_transcripts = sum(segfile$cell == .x)
+                                                  ), 
+                                                  .options = furrr_options(seed = TRUE)
+        )
+        cellidx <- transcriptspercell$cell[transcriptspercell$num_transcripts > 5]
+        segfile.new <- furrr::future_map_dfr(.x = cellidx, function(.x) { 
+            res <- st_as_sf(segfile[segfile$cell == .x, c('x', 'y')], coords = c('x', 'y')) %>%
+                st_union() %>% #dont remove the union. It is needed here.
+                ct_triangulate()
+            resdf <- data.frame(cell = .x, geometry = res)
+            return(resdf)
+        }, .options = furrr_options(seed = TRUE))
+        
+        cellgeoms_final<-segfile.new$geometry %>% 
+            furrr::future_map(purrr::reduce, st_union, .options = furrr_options(seed = TRUE)) %>%
+            st_sfc() %>%
+            as.data.frame()
+        
+        cellgeoms_final<-cellgeoms_final %>%
+            cbind(transcriptspercell[transcriptspercell$cell %in% cellidx, ])
+        
+        return(cellgeoms_final)
+        
+    
+    
+}
+
+
+transcriptCoords$fov_slide <- paste(transcriptCoords$fov, transcriptCoords$slideID, sep="_")
+max(table(transcriptCoords$fov_slide))
+
+fov_5_1 <- transcriptCoords[transcriptCoords$fov_slide %in% c("5_1"),]
+colnames(fov_5_1)[colnames(fov_5_1) == 'x_FOV_px'] <- 'x'
+colnames(fov_5_1)[colnames(fov_5_1) == 'y_FOV_px'] <- 'y'
+colnames(fov_5_1)[colnames(fov_5_1) == 'CellId'] <- 'cell'
+
+
+library(furrr)
+library(sfdct)
+library(sf)
+
+
+cellgeoms_baysorfov_5_1 <- cellgeoms_baysor(fov_5_1)
+
+table(meta.data_5_1$fov)
+
+
+meta.data<-obj2@meta.data
+meta.data_5_1<-meta.data[meta.data$slide_ID_numeric=="1",]
+meta.data_5_1<-meta.data_5_1[meta.data_5_1$fov=="5",]
+
+cellgeoms_baysorfov_5_1$cell_id <- paste("c_1_5_", cellgeoms_baysorfov_5_1$cell, sep="")
+
+index <- match(cellgeoms_baysorfov_5_1$cell_id, rownames(meta.data_5_1))
+cellgeoms_baysorfov_5_1$named_new <- meta.data_5_1$named3[index]
+
+#plot an fov with seurat annotatons
+cellgeoms_baysorfov_5_1 %>% as.data.frame %>% 
+    ggplot()+
+     geom_sf(aes(geometry = geometry, fill = named_new), alpha = 0.9,
+              color = NA)+xlim(0,2000)+ylim(0,2000)+
+   geom_point(data=fov_5_1,aes(x, y), shape = '.', size=1) +theme_minimal()
+
+#plot an fov without seurat annotatons
+cellgeoms_baysorfov_5_1 %>% as.data.frame %>% 
+    ggplot()+
+     geom_sf(aes(geometry = geometry, fill = named_new), alpha = 0.9,
+              color = NA)
+
+#zoom
+cellgeoms_baysorfov_5_1 %>% as.data.frame %>% 
+    ggplot()+
+     geom_sf(aes(geometry = geometry),fill = 'red', alpha = 0.4,
+              color = NA)+
+  xlim(0,2000)+ylim(0,2000)+
+   geom_point(data=fov_5_1,aes(x, y), shape = '.', size=1) +theme_minimal()
+
+
+
+#plot specific txs for selected genes
+fov_5_1 %>% ggplot(aes(x=x,y=y)) + 
+  geom_point(alpha=0.3, shape=".") +
+  geom_point(data=fov_5_1[fov_5_1$target %in% c("VWF", "IGFBP7", "PECAM1", "CDH5"),],
+             aes(x=x,y=y, color=target), 
+                   size=1)+ scale_color_brewer(palette="Dark2")
+
+
+#loop to plot each FOV with seurat annotations
+transcriptCoords_slide1 <- transcriptCoords[transcriptCoords$slideID == 1,]
+transcriptCoords_slide2 <- transcriptCoords[transcriptCoords$slideID == 2,]
+
+
+fovs_slide1 <- 1:max(transcriptCoords_slide1$fov)
+fov_tx_list_slide1 <- list()
+cell_geoms_out_S1 <- list()
+for (i in 1:max(transcriptCoords_slide1$fov)) {
+fov_tx_list_slide1[[i]] <- transcriptCoords_slide1[transcriptCoords_slide1$fov== fovs_slide1[[i]] ,];
+colnames(fov_tx_list_slide1[[i]])[colnames(fov_tx_list_slide1[[i]]) == 'x_FOV_px'] <- 'x';
+colnames(fov_tx_list_slide1[[i]])[colnames(fov_tx_list_slide1[[i]]) == 'y_FOV_px'] <- 'y';
+colnames(fov_tx_list_slide1[[i]])[colnames(fov_tx_list_slide1[[i]]) == 'CellId'] <- 'cell';
+cell_geoms_out_S1[[i]] <- cellgeoms_baysor(fov_tx_list_slide1[[i]]);
+}
+
+fovs_slide2 <- 1:max(transcriptCoords_slide2$fov)
+fov_tx_list_slide2 <- list()
+cell_geoms_out_S2 <- list()
+for (i in 1:max(transcriptCoords_slide2$fov)) {
+fov_tx_list_slide2[[i]] <- transcriptCoords_slide2[transcriptCoords_slide2$fov== fovs_slide2[[i]] ,];
+colnames(fov_tx_list_slide2[[i]])[colnames(fov_tx_list_slide2[[i]]) == 'x_FOV_px'] <- 'x';
+colnames(fov_tx_list_slide2[[i]])[colnames(fov_tx_list_slide2[[i]]) == 'y_FOV_px'] <- 'y';
+colnames(fov_tx_list_slide2[[i]])[colnames(fov_tx_list_slide2[[i]]) == 'CellId'] <- 'cell';
+cell_geoms_out_S2[[i]] <- cellgeoms_baysor(fov_tx_list_slide2[[i]]);
+}
+
+
+
+meta.data<-obj2@meta.data
+meta.data_slide1<-meta.data[meta.data$slide_ID_numeric=="1",]
+meta.data_slide2<-meta.data[meta.data$slide_ID_numeric=="2",]
+
+meta_fovs_slide1 <- list()
+index_ls_slide1 <- list()
+ggplot_ls_slide1 <- list()
+for (i in 1:max(transcriptCoords_slide1$fov)) {
+meta_fovs_slide1[[i]] <- meta.data_slide1[meta.data_slide1$fov== fovs_slide1[[i]] ,];
+cell_geoms_out_S1[[i]]$cell_id <- paste("c_1_", fovs_slide1[[i]], "_", cell_geoms_out_S1[[i]]$cell, sep="");
+index_ls_slide1[[i]] <- match(cell_geoms_out_S1[[i]]$cell_id, rownames(meta_fovs_slide1[[i]]));
+cell_geoms_out_S1[[i]]$named_new <- meta_fovs_slide1[[i]]$named3[index_ls_slide1[[i]]];
+ggplot_ls_slide1[[i]] <- cell_geoms_out_S1[[i]] %>% as.data.frame %>% ggplot()+ geom_sf(aes(geometry = geometry, fill = named_new), alpha = 0.9,color = NA)+theme_minimal()
+}
+
+for (i in 1:max(transcriptCoords_slide1$fov)) {
+print(ggplot_ls_slide1[[i]]);
+}
+
+meta_fovs_slide2 <- list()
+index_ls_slide2 <- list()
+ggplot_ls_slide2 <- list()
+for (i in 1:max(transcriptCoords_slide2$fov)) {
+meta_fovs_slide2[[i]] <- meta.data_slide2[meta.data_slide2$fov== fovs_slide2[[i]] ,];
+cell_geoms_out_S2[[i]]$cell_id <- paste("c_2_", fovs_slide2[[i]], "_", cell_geoms_out_S2[[i]]$cell, sep="");
+index_ls_slide2[[i]] <- match(cell_geoms_out_S2[[i]]$cell_id, rownames(meta_fovs_slide2[[i]]));
+cell_geoms_out_S2[[i]]$named_new <- meta_fovs_slide2[[i]]$named3[index_ls_slide2[[i]]];
+ggplot_ls_slide2[[i]] <- cell_geoms_out_S2[[i]] %>% as.data.frame %>% ggplot()+ geom_sf(aes(geometry = geometry, fill = named_new), alpha = 0.9,color = NA)+theme_minimal()
+}
+
+
+for (i in 1:max(transcriptCoords_slide1$fov)) {
+print(ggplot_ls_slide1[[i]]);
+}
+
+
+for (i in 1:max(transcriptCoords_slide2$fov)) {
+print(ggplot_ls_slide2[[i]]);
+}
+
+
