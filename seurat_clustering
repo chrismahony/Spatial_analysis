@@ -1,0 +1,71 @@
+#read in NS seurat obj, then recreaet seurat onj
+library(ggplot2)
+library(Seurat)
+
+obj2 <- CreateSeuratObject(counts=obj@assays[["RNA"]]@counts, meta.data = obj@meta.data)
+
+#check metrics
+ggplot(as.data.frame(obj2$nCount_RNA), aes(x=obj2$nCount_RNA)) + 
+  geom_histogram(color="black", fill="white") + xlim(0,100)
+
+ggplot(as.data.frame(obj2$nFeature_RNA), aes(x=obj2$nFeature_RNA)) + 
+  geom_histogram(color="black", fill="white") + xlim(0,100)
+
+median(obj2$nCount_RNA)
+hist(obj2$nCount_RNA)
+
+#QC
+obj2 <- subset(obj2, subset = nFeature_RNA > 15 & nCount_RNA > 15)
+
+#do not use default NormalizeData(scale.factor=10000)
+sf <- median(obj2$nCount_RNA)
+
+obj2 <- obj2 %>%
+    NormalizeData(scale.factor=sf) %>%
+    ScaleData() %>%
+    FindVariableFeatures() %>%
+    RunPCA(verbose = FALSE) %>%
+    RunUMAP(dims = 1:30, verbose = FALSE)
+
+obj2 <- RunUMAP(obj2, dims = 1:30, verbose = FALSE)
+
+
+#need to Hamronize (normally yes)
+DimPlot(obj2, group.by = "slide_ID_numeric")
+DimPlot(obj2, group.by = "fov")
+
+library(harmony)
+
+obj2@meta.data$"fov" <- as.character(obj2@meta.data$"fov")
+obj2@meta.data$"slide_ID_numeric" <- as.character(obj2@meta.data$"slide_ID_numeric")
+
+obj2 <- RunHarmony.Seurat_CM(obj2, group.by.vars = c("fov", "slide_ID_numeric"))
+obj2 <- RunUMAP(obj2, reduction="harmony",  dims=1:50)
+obj2 <- FindNeighbors(obj2, reduction="harmony", dims=1:50)
+obj2 <- FindClusters(obj2, resolution = c(0.05, 0.1, 0.2, 0.3, 0.4))
+obj2 <- FindClusters(obj2, resolution = c(0.6, 0.7, 0.8))
+
+Idents(obj2) <- "RNA_snn_res.0.8"
+markers_0.8 <- FindAllMarkers(obj2, only.pos = T, logfc.threshold = 0.2)
+
+
+#sub cluster using FindSubCluster(), to be used for clusters with no markers
+obj2 <- FindSubCluster(obj2, cluster="0", subcluster.name = "sub.cluster0_0.3", resolution = 0.3, graph.name="RNA_snn")
+DimPlot(obj2, group.by="sub.cluster0_0.8", label=T
+
+
+
+#rename and view (might need to redo t his a few times!)
+obj2$named <- obj2@meta.data[["sub.cluster0_0.8"]]
+Idents(obj2) <- 'named'
+levels(obj2)
+current.sample.ids <- c("0_2" , "0_4" , "5" ,   "2" ,   "4"  ,  "3"  ,  "1"  ,  "0_5" , "0_1" , "0_6",  "0_0" , "0_8" , "0_7" , "0_10", "0_3",  "6"  ,  "8" ,   "0_11", "7" ,   "0_9" , "0_12")
+new.sample.ids <- c("imune_mix" , "imune_mix" , "MALAT1_fibs" ,   "macs" ,   "colagen_fibs"  ,  "fibs"  ,  "CLEC4A_macs"  ,  "adipose" , "imune_mix" , "imune_mix",  "imune_mix" , "imune_mix" , "imune_mix" , "endo1", "imune_mix",  "plasmacells"  ,  "endo2" ,   "imune_mix", "plasmacells" ,   "imune_mix" , "imune_mix")
+
+obj2@meta.data[["named"]] <- plyr::mapvalues(x = obj2@meta.data[["named"]], from = current.sample.ids, to = new.sample.ids)
+DimPlot(obj2, group.by="named", label=T)
+VlnPlot(obj2, features = "IL32", group.by = "named")
+
+
+
+
