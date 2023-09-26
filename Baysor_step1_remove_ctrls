@@ -1,0 +1,34 @@
+#slide S0
+samples<-1:45
+samples[1:9]<-paste("FOV00", samples[1:9], sep="")
+samples[10:45]<-paste("FOV0", samples[10:45], sep="")
+dirs_S0<-list.dirs(path = "/rds/projects/c/croftap-celldive01/CosmX_analysis/Run2_boston/mahony_rerun/S0/20230816_233532_S4/AnalysisResults/cp802e9u4t", recursive = FALSE)
+dirs_S0<-paste(dirs_S0, "/Run_e47b11df-1aa0-49d5-8a8d-776effa96a4d_", samples, "__complete_code_cell_target_call_coord.csv", sep="")
+
+outs<-paste("/rds/projects/c/croftap-celldive01/CosmX_analysis/Run2_boston/analysis_baysor/step1_remove_controls/", samples, ".csv", sep="")
+
+data = list()
+for (i in 1:length(samples)) {
+    data[[i]] <- read.csv(dirs_S0[[i]]);
+    data[[i]]<-data[[i]][!data[[i]]$codeclass== "SystemControl",];
+    data[[i]]<-data[[i]][!data[[i]]$codeclass== "Negative",];
+    write.csv( data[[i]], outs[[i]])
+}
+
+
+#slide S1
+samples<-1:28
+samples[1:9]<-paste("FOV00", samples[1:9], sep="")
+samples[10:28]<-paste("FOV0", samples[10:28], sep="")
+dirs_S1<-list.dirs(path = "/rds/projects/c/croftap-celldive01/CosmX_analysis/Run2_boston/mahony_rerun/S1/20230816_233532_S3/AnalysisResults/yym1ukncl0", recursive = FALSE)
+dirs_S1<-paste(dirs_S1, "/Run_e47b11df-1aa0-49d5-8a8d-776effa96a4d_", samples, "__complete_code_cell_target_call_coord.csv", sep="")
+
+outs<-paste("/rds/projects/c/croftap-celldive01/CosmX_analysis/Run2_boston/analysis_baysor/step1_remove_controls/S1_", samples, ".csv", sep="")
+
+data = list()
+for (i in 1:length(samples)) {
+    data[[i]] <- read.csv(dirs_S0[[i]]);
+    data[[i]]<-data[[i]][!data[[i]]$codeclass== "SystemControl",];
+    data[[i]]<-data[[i]][!data[[i]]$codeclass== "Negative",];
+    write.csv( data[[i]], outs[[i]])
+}
